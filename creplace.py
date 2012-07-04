@@ -1,9 +1,12 @@
 #!/usr/bin/python
 
+"""Drop-in replacement for clang. Logs the arguments passed to the compiler to
+the file xxx_compiler_args.out. Set the CC and CXX to point at this script.
+
 """
-Drop-in replacement for clang. Logs the arguments passed to the 
-compiler to the file xxx_compiler_args.out 
-"""
+
+__author__= "Sean Heelan"
+__email__ = "sean.heelan@gmail.com"
 
 import sys
 import subprocess
