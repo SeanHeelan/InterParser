@@ -1,7 +1,16 @@
+"""Process all files that are part of a PHP build and extract the format
+string parameter passed to any calls to zend_parse_parameters. The results
+are output in a file mapping the names of such functions to the format string.
+
+Relies on :
+https://raw.github.com/indygreg/clang/python_features/bindings/python/
+clang/cindex.py
+https://raw.github.com/indygreg/clang/python_features/bindings/python/
+clang/enumerations.py
 """
-Relies on https://raw.github.com/indygreg/clang/python_features/bindings/
-python/clang/cindex.py
-"""
+
+__author__= "Sean Heelan"
+__email__ = "sean.heelan@gmail.com"
 
 import sys
 import logging
@@ -16,6 +25,8 @@ from interparser.ccargparse import load_project_data
 ZEND_FUNC = "zend_parse_parameters"
 DESC = "Format string extractor for %s" % ZEND_FUNC
 
+# Counter for the number of calls to ZEND_FUNC detected that use a
+# variable rather than a string literal as their argument
 VAR_ARG_COUNT = 0
 
 class FunctionProcessingError(Exception):
@@ -25,8 +36,7 @@ class VariableArgumentError(Exception):
     pass
 
 def get_child(node, idx):
-    """
-    Return child number 'idx' of the AST cursor 'node'
+    """Return child number 'idx' of the AST cursor 'node'
 
     @type node: clang.cindex.Cursor
     @param node: The node to process
@@ -35,19 +45,20 @@ def get_child(node, idx):
     @param idx: The index of the child to return
 
     @rtype: clang.cinde.Cursor
+
     """
 
     return list(node.get_children())[idx]
 
 def extract_fmt_str(func_call_nodes):
-    """
-    Extact the format string from a call to ZEND_FUNC
+    """Extact the format string from a call to ZEND_FUNC
 
     @type func_call_nodes: List of clang.cindex.Cursor
     @param func_call_nodes: A list of the AST nodes for the function call
 
     @rtype: String
     @return: The format string parameter to the call
+
     """
 
     # The format string is the child of an UNEXPOSED_EXPR
@@ -67,10 +78,9 @@ def extract_fmt_str(func_call_nodes):
     return fmt_str
 
 def process_function(func_cursor):
-    """
-    Search the function indicated by 'func_cursor' for the first call to
-    zend_parse_parameters. If such a call is found then we return the
-    format string used.
+    """Search the function indicated by 'func_cursor' for the first call to
+    zend_parse_parameters. If such a call is found then we return the format
+    string used.
 
     @type func_cursor: clang.cindex.Cursor
     @param func_cursor: A cursor object for the function to prcoess
@@ -78,6 +88,7 @@ def process_function(func_cursor):
     @rtype: String
     @return: The format string argument to the first call to
         zend_parse_parameters within the given function
+
     """
 
     log = logging.getLogger("process_function")
@@ -127,8 +138,7 @@ def process_function(func_cursor):
         return None
 
 def process_all_functions(tu, file_filter=None):
-    """
-    Iterate over the translation unit tu, searching for functions that call
+    """Iterate over the translation unit tu, searching for functions that call
     ZEND_FUNC. When a call is found the format string used is extracted. A
     map of each calling function to the format string used in the call to
     ZEND_FUNC is returned.
@@ -144,6 +154,7 @@ def process_all_functions(tu, file_filter=None):
         we will process all children of the translation unit.
 
     @rtype: Dict
+
     """
 
     log = logging.getLogger("process_all_functions")
@@ -169,8 +180,7 @@ def process_all_functions(tu, file_filter=None):
     return res
 
 def write_output(src_file, data, out_file):
-    """
-    Log the function/format string mappings extracted from 'src_file'
+    """Log the function/format string mappings extracted from 'src_file'
 
     @type src_file: String
     @param src_file: The C/C++ source file from which the data was extracted
@@ -182,7 +192,8 @@ def write_output(src_file, data, out_file):
     @type out_file: String
     @param out_file: The log file to which the data will be appended
 
-    @rtype None
+    @rtype: None
+
     """
 
     with open(out_file, "ab") as fd:
