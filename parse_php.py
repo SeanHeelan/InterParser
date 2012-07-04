@@ -21,6 +21,9 @@ VAR_ARG_COUNT = 0
 class FunctionProcessingError(Exception):
     pass
 
+class VariableArgumentError(Exception):
+    pass
+
 def get_child(node, idx):
     """
     Return child number 'idx' of the AST cursor 'node'
@@ -52,11 +55,12 @@ def extract_fmt_str(func_call_nodes):
     tk_container = get_child(tmp, 0)
 
     if tk_container.kind != clang.CursorKind.STRING_LITERAL:
-        msg = "Incorrect argument type: %s" % tk_container.kind
-        log.error(msg)
-        raise FunctionProcessingError(msg)
+        raise VariableArgumentError()
 
     tokens = list(tk_container.get_tokens())
+    if tokens[0] is None:
+        return ""
+
     # Strip the quotation marks as we get the string literal
     fmt_str = tokens[0].spelling[1:-1]
 
@@ -96,8 +100,15 @@ def process_function(func_cursor):
             unexposed_exprs = list(n.get_children())
             func_name_node = get_child(unexposed_exprs[0], 0)
             if func_name_node.displayname == ZEND_FUNC:
-                fmt_strs.add(extract_fmt_str(unexposed_exprs))
-                break
+                try:
+                    fmt_str = extract_fmt_str(unexposed_exprs)
+                except VariableArgumentError:
+                    global VAR_ARG_COUNT
+                    VAR_ARG_COUNT += 1
+                else:
+                    if len(fmt_str):
+                        fmt_strs.add(fmt_str)
+                    break
 
         for c in n.get_children():
             to_process.put(c)
