@@ -5,6 +5,7 @@ python/clang/cindex.py
 
 import sys
 import logging
+import argparse
 
 from Queue import Queue
 
@@ -12,8 +13,10 @@ import clang.cindex as clang
 
 from interparser.ccargparse import load_project_data
 
-USAGE = "%s compiler_wrapper_output"
 ZEND_FUNC = "zend_parse_parameters"
+DESC = "Format string extractor for %s" % ZEND_FUNC
+
+VAR_ARG_COUNT = 0
 
 class FunctionProcessingError(Exception):
     pass
@@ -141,31 +144,58 @@ def process_all_functions(tu, file_filter=None):
                 log.debug("%s does not call %s" % (c.spelling, ZEND_FUNC))
                 continue
             else:
-                log.info("%s calls %s with the format string %s" % \
+                log.debug("%s calls %s with the format string %s" % \
                          (c.spelling, ZEND_FUNC, fmt_str))
+                res[c.spelling] = fmt_str
+    return res
 
-def main(argv):
+def write_output(src_file, data, out_file):
+    """
+    Log the function/format string mappings extracted from 'src_file'
+
+    @type src_file: String
+    @param src_file: The C/C++ source file from which the data was extracted
+
+    @type data: Dict
+    @param data: A mapping of function names to format strings used within
+        those functions as parameters to ZEND_FUNC
+
+    @type out_file: String
+    @param out_file: The log file to which the data will be appended
+
+    @rtype None
+    """
+
+    with open(out_file, "ab") as fd:
+        fd.write("# %s\n" % src_file)
+        for func_name, fmt_str in data.items():
+            fd.write("%s %s\n" % (func_name, fmt_str))
+
+def main(cc_file, output_file, single_file=None):
     log = logging.getLogger("main")
 
-    if len(argv) < 2:
-        log.error(USAGE % argv[0])
-        return -1
-
-    log.info("Loading compiler args from %s" % argv[1])
-    comp_args = load_project_data(argv[1])
+    log.info("Loading compiler args from %s" % cc_file)
+    comp_args = load_project_data(cc_file)
     log.info("Found compiler args for %d source files" % len(comp_args))
 
-    if len(argv) == 3:
-        src_file = sys.argv[2]
-        args = comp_args[src_file]
+    if single_file:
+        if single_file not in comp_args:
+            log.error("The file %s is not in the compiler arg log" % \
+                      single_file)
+            return -1
 
-        log.info("Processing %s" % src_file)
+        args = comp_args[single_file]
+
+        log.info("Processing %s" % single_file)
         log.debug("Compiler args: %s" % " ".join(list(args)))
 
         index = clang.Index.create()
-        tu = index.parse(src_file, args)
-        process_all_functions(tu, src_file)
-        return
+        tu = index.parse(single_file, args)
+        tu_data = process_all_functions(tu, single_file)
+        log.info("Found %d functions in %s that call %s" % \
+                 (len(tu_data), single_file, ZEND_FUNC))
+        if len(tu_data):
+            write_output(single_file, tu_data, output_file)
     else:
         log.info("Processing all source files ...")
 
@@ -175,9 +205,29 @@ def main(argv):
 
             index = clang.Index.create()
             tu = index.parse(src_file, args)
-            process_all_functions(tu, src_file)
-        return
+            tu_data = process_all_functions(tu, src_file)
+            log.info("Found %d functions in %s that call %s" % \
+                     (len(tu_data), src_file, ZEND_FUNC))
+            if len(tu_data):
+                write_output(src_file, tu_data, output_file)
+
+    log.info("%d calls to %s with variable parameters" % \
+             (VAR_ARG_COUNT, ZEND_FUNC))
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    sys.exit(main(sys.argv))
+
+    parser = argparse.ArgumentParser(description=DESC)
+    parser.add_argument("-c", dest="cc_log", required=True,
+                      help="The file created by the compiler wrapper")
+    parser.add_argument("-o", dest="output_file", required=True,
+                      help="The name of the output file")
+    parser.add_argument("-s", dest="single_file", default=None,
+                      help="Specify a single source file to process")
+    args = parser.parse_args()
+
+    cc_log = args.cc_log
+    output_file = args.output_file
+    single_file = args.single_file
+
+    sys.exit(main(cc_log, output_file, single_file))
