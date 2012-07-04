@@ -128,6 +128,11 @@ def process_function(func_cursor):
 
 def process_all_functions(tu, file_filter=None):
     """
+    Iterate over the translation unit tu, searching for functions that call
+    ZEND_FUNC. When a call is found the format string used is extracted. A
+    map of each calling function to the format string used in the call to
+    ZEND_FUNC is returned.
+
     @type tu: clang.cindex.TranslationUnit
     @param tu: The top level translation unit for a file
 
@@ -137,9 +142,12 @@ def process_all_functions(tu, file_filter=None):
         included files. This parameter specifies a file name to
         which we will restrict our processing. If it is None then
         we will process all children of the translation unit.
+
+    @rtype: Dict
     """
 
     log = logging.getLogger("process_all_functions")
+    res = {}
 
     for c in tu.cursor.get_children():
         if c.kind == clang.CursorKind.FUNCTION_DECL:
