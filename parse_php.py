@@ -62,14 +62,15 @@ def extract_fmt_str(func_call_nodes):
 
     """
 
-    # The format string is the child of an UNEXPOSED_EXPR
-    tmp = get_child(func_call_nodes[2], 0)
-    tk_container = get_child(tmp, 0)
+    # The format string is the child of an UNEXPOSED_EXPR introduced due to
+    # an rvalue-to-lvalue conversion
+    unex_expr = get_child(func_call_nodes[2], 0)
+    tkn_container = get_child(unex_expr, 0)
 
-    if tk_container.kind != clang.CursorKind.STRING_LITERAL:
+    if tkn_container.kind != clang.CursorKind.STRING_LITERAL:
         raise VariableArgumentError()
 
-    tokens = list(tk_container.get_tokens())
+    tokens = list(tkn_container.get_tokens())
     if tokens[0] is None:
         return ""
 
@@ -94,8 +95,8 @@ def process_function(func_cursor):
 
     log = logging.getLogger("process_function")
 
-    to_process = Queue()
     fmt_strs = set()
+    to_process = Queue()
     to_process.put(func_cursor)
 
     while not to_process.empty():
@@ -115,12 +116,21 @@ def process_function(func_cursor):
                 try:
                     fmt_str = extract_fmt_str(unexposed_exprs)
                 except VariableArgumentError:
+                    # A negligible number of calls to ZEND_FUNC pass the
+                    # format string using a variable.
                     global VAR_ARG_COUNT
                     VAR_ARG_COUNT += 1
                 else:
+                    # Some calls to ZEND_FUNC have an empty format string
                     if len(fmt_str):
                         fmt_strs.add(fmt_str)
-                    break
+                finally:
+                    # Regardless of our success/failure at retrieving the
+                    # format string arg we 1) Don't explore the children
+                    # of the CALL node and 2) Do explore the rest of the
+                    # function in case there are multiple calls to ZEND_FUNC
+                    # with different arguments (highly unlikely).
+                    continue
 
         for c in n.get_children():
             to_process.put(c)
