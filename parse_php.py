@@ -85,16 +85,15 @@ def extract_fmt_str(func_call_nodes):
     return fmt_str
 
 def process_function(func_cursor):
-    """Search the function indicated by 'func_cursor' for the first call to
-    zend_parse_parameters. If such a call is found then we return the format
-    string used.
+    """Search the function indicated by 'func_cursor' for the all calls to
+    zend_parse_parameters. Return all format strings used by such invocations.
 
     @type func_cursor: clang.cindex.Cursor
     @param func_cursor: A cursor object for the function to prcoess
 
-    @rtype: String
-    @return: The format string argument to the first call to
-        zend_parse_parameters within the given function
+    @rtype: List of Strings
+    @return: A list of all unique format strings used as arguments to
+        ZEND_FUNC within the specified function
 
     """
 
@@ -133,29 +132,21 @@ def process_function(func_cursor):
                 # format string arg we 1) Don't explore the children
                 # of the CALL node and 2) Do explore the rest of the
                 # function in case there are multiple calls to ZEND_FUNC
-                # with different arguments (highly unlikely).
+                # with different arguments (e.g. the levenshtein function).
                 continue
 
         for c in n.get_children():
             to_process.put(c)
 
-    if len(fmt_strs) > 1:
-        loc = func_cursor.location
-        msg = ("The function %s in %s (%d:%d) contains calls to " + \
-               "%s with different format strings") % \
-            (func_cursor.spelling, ZEND_FUNC, loc.file.name, loc.line,
-             loc.column)
-        log.error(msg)
-        raise FunctionProcessingError(msg)
-    elif len(fmt_strs) > 0:
-        return fmt_strs.pop()
+    if len(fmt_strs):
+        return list(fmt_strs)
     else:
         return None
 
-def process_all_functions(tu, file_filter=None):
+def process_all_functions(tu, file_filter=None, globals_only=False):
     """Iterate over the translation unit tu, searching for functions that call
     ZEND_FUNC. When a call is found the format string used is extracted. A
-    map of each calling function to the format string used in the call to
+    map of each calling function to the format strings used in all calls to
     ZEND_FUNC is returned.
 
     @type tu: clang.cindex.TranslationUnit
@@ -180,18 +171,25 @@ def process_all_functions(tu, file_filter=None):
             f = c.location.file
             if file_filter and f.name != file_filter:
                 continue
+
+            if globals_only and not c.spelling.startswith("zif_"):
+                # Exclude functions that are not defined using the
+                # PHP_FUNCTION macro
+                continue
+
             log.debug("Processing function %s in %s (%d:%d)" % \
                 (c.spelling, f.name, c.location.line, c.location.column))
 
             # Check if the function contains a call to zend_parse_parameters
-            fmt_str = process_function(c)
-            if fmt_str is None:
+            fmt_strs = process_function(c)
+            if fmt_strs is None:
                 log.debug("%s does not call %s" % (c.spelling, ZEND_FUNC))
                 continue
             else:
-                log.debug("%s calls %s with the format string %s" % \
-                         (c.spelling, ZEND_FUNC, fmt_str))
-                res[c.spelling] = fmt_str
+                tmp = ", ".join(fmt_strs)
+                log.debug("%s calls %s with the format string(s) %s" % \
+                         (c.spelling, ZEND_FUNC, tmp))
+                res[c.spelling] = fmt_strs
     return res
 
 def write_output(src_file, data, out_file):
@@ -213,15 +211,17 @@ def write_output(src_file, data, out_file):
 
     with open(out_file, "ab") as fd:
         fd.write("# %s\n" % src_file)
-        for func_name, fmt_str in data.items():
-            fd.write("%s %s\n" % (func_name, fmt_str))
+        for func_name, fmt_strs in data.items():
+            fd.write("%s %s\n" % (func_name, ", ".join(fmt_strs)))
 
-def main(cc_file, output_file, single_file=None):
+def main(cc_file, output_file, single_file=None, globals_only=False):
     log = logging.getLogger("main")
 
     log.info("Loading compiler args from %s" % cc_file)
     comp_args = load_project_data(cc_file)
     log.info("Found compiler args for %d source files" % len(comp_args))
+
+    file_count = func_count = 0
 
     if single_file:
         if single_file not in comp_args:
@@ -236,10 +236,12 @@ def main(cc_file, output_file, single_file=None):
 
         index = clang.Index.create()
         tu = index.parse(single_file, args)
-        tu_data = process_all_functions(tu, single_file)
+        tu_data = process_all_functions(tu, single_file, globals_only)
         log.info("Found %d functions in %s that call %s" % \
                  (len(tu_data), single_file, ZEND_FUNC))
         if len(tu_data):
+            file_count += 1
+            func_count += len(tu_data)
             write_output(single_file, tu_data, output_file)
     else:
         log.info("Processing all source files ...")
@@ -250,12 +252,16 @@ def main(cc_file, output_file, single_file=None):
 
             index = clang.Index.create()
             tu = index.parse(src_file, args)
-            tu_data = process_all_functions(tu, src_file)
+            tu_data = process_all_functions(tu, src_file, globals_only)
             log.info("Found %d functions in %s that call %s" % \
                      (len(tu_data), src_file, ZEND_FUNC))
             if len(tu_data):
+                file_count += 1
+                func_count += len(tu_data)
                 write_output(src_file, tu_data, output_file)
 
+    log.info("API info for %d functions in %d files written to %s" % \
+             (func_count, file_count, output_file))
     log.info("%d calls to %s with variable parameters" % \
              (VAR_ARG_COUNT, ZEND_FUNC))
 
@@ -269,10 +275,15 @@ if __name__ == "__main__":
                       help="The name of the output file")
     parser.add_argument("-s", dest="single_file", default=None,
                       help="Specify a single source file to process")
+    parser.add_argument("--globals_only", dest="globals_only",
+                        action="store_true", default=False,
+                        help="If specified then we exclude class methods " + \
+                        "from the results")
     args = parser.parse_args()
 
     cc_log = args.cc_log
     output_file = args.output_file
     single_file = args.single_file
+    globals_only = args.globals_only
 
-    sys.exit(main(cc_log, output_file, single_file))
+    sys.exit(main(cc_log, output_file, single_file, globals_only))
