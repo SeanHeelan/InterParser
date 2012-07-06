@@ -129,13 +129,12 @@ def process_function(func_cursor):
                     # Some calls to ZEND_FUNC have an empty format string
                     if len(fmt_str):
                         fmt_strs.add(fmt_str)
-                finally:
-                    # Regardless of our success/failure at retrieving the
-                    # format string arg we 1) Don't explore the children
-                    # of the CALL node and 2) Do explore the rest of the
-                    # function in case there are multiple calls to ZEND_FUNC
-                    # with different arguments (highly unlikely).
-                    continue
+                # Regardless of our success/failure at retrieving the
+                # format string arg we 1) Don't explore the children
+                # of the CALL node and 2) Do explore the rest of the
+                # function in case there are multiple calls to ZEND_FUNC
+                # with different arguments (highly unlikely).
+                continue
 
         for c in n.get_children():
             to_process.put(c)
