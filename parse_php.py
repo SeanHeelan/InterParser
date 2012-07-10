@@ -212,7 +212,7 @@ def write_output(src_file, data, out_file):
     with open(out_file, "ab") as fd:
         fd.write("# %s\n" % src_file)
         for func_name, fmt_strs in data.items():
-            fd.write("%s %s\n" % (func_name, ", ".join(fmt_strs)))
+            fd.write("%s %s\n" % (func_name, " ".join(fmt_strs)))
 
 def main(cc_file, output_file, single_file=None, globals_only=False):
     log = logging.getLogger("main")
